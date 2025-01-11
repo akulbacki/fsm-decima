@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DECIMA playground (v0.1 alfa)</title>
+    <style>
+        * {
+            padding: 0;
+            margin: 0;
+        }
+        canvas {
+            position: absolute;
+            border: 1px solid #000;
+        }
+    </style>
+</head>
+<body>
+    <script type="text/javascript" src="./core/canvaspie.engine.js"></script>
+    <script type="text/javascript" src="./core/decima.engine.js"></script>
+    <script type="text/javascript" src="./core/turnbase.engine.js"></script>
+    <script>
+        const browserWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+        const browserHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+
+        const LayerWidth = browserWidth > 425 ? 600 : browserWidth;
+        const LayerHeight = browserHeight > 900 ? 900 : browserHeight;
+
+        const clickPosition = {x: 0, y: 0};
+        const staticLayer = new CanvasPie(LayerWidth, LayerHeight);
+        const dynaminLayer = new CanvasPie(LayerWidth, LayerHeight);
+        
+        const you = new Image();
+        you.src = './assets/human.jpg';
+
+        const bot = new Image();
+        bot.src = './assets/bot.jpg';
+
+        const font8bit = new FontFace('font8bit', 'url(./assets/PressStart2P.ttf)');
+        let arJournal = [];
+
+        let hasClicked = false;
+        let gameStage = "init";
+
+        const players = {
+            you: {
+                health: 100,
+                owner: "human",
+                last_ability: null,
+                jump: false,
+                stun: false,
+                abilities: [
+                    {label:"Ударить", type: "attack", points: 10, x: 0, y: 0},
+                    {label:"Оглушить", type: "stun", points: 5, x: 0, y: 0},
+                    {label:"Лечиться", type: "heal", points: 10, x: 0, y: 0},
+                    {label:"Увернуться", type: "jump", points: 0, x: 0, y: 0},
+                ]
+            },
+            bot: {
+                health: 100,
+                owner: "zombie",
+                last_ability: null,
+                jump: false,
+                stun: false,
+                abilities: [
+                    {label:"Ударить", type: "attack", points: 10, x: 0, y: 0},
+                    {label:"Оглушить", type: "stun", points: 5, x: 0, y: 0},
+                    {label:"Лечиться", type: "heal", points: 10, x: 0, y: 0},
+                    {label:"Увернуться", type: "jump", points: 0, x: 0, y: 0},
+                ]
+            }
+        }
+
+        
+        for(var i = 0; i < players.bot.abilities.length; i++) {
+            players.bot.abilities[i].x = 20;
+            players.bot.abilities[i].y = 110 + (i * 25);
+            
+            players.you.abilities[i].x = LayerWidth-255;
+            players.you.abilities[i].y = LayerHeight-90 - (i * 25);
+        }
+
+        const gameRuler = new TurnBaseEngine([players.bot, players.you], 6000);
+        const brain = new DecisionMaker((win, loose) => {
+            const healthDifference = win - loose;
+
+            console.log('healthDifference', healthDifference);
+            if (healthDifference < -1) {
+                healing(players.bot);
+            } else if (healthDifference < -2) {
+                // Если боту плохо, он может заморозить противника
+                stunning(players.bot, players.you);
+            } else {
+                // В остальных случаях бот атакует или уворачивается
+                const attackProbability = 0.6; // Вероятность атаки
+                const randomAction = Math.random();
+
+                if (randomAction < attackProbability) {
+                    attack(players.bot, players.you);
+                } else {
+                    jumping(players.bot);
+                }
+            }
+        }, players.bot.abilities);
+
+        function handleClickPosition(canvas) {
+            canvas.addEventListener('click', (event) => {
+                if (!hasClicked) {
+                    clickPosition.x = Math.floor(event.offsetX);
+                    clickPosition.y = Math.floor(event.offsetY);
+
+                    const clickedAbility = players.you.abilities.find(btn => 
+                        btn.x <= clickPosition.x && (btn.x + 240) >= clickPosition.x &&
+                        btn.y - 20 <= clickPosition.y && btn.y >= clickPosition.y
+                    );
+
+                    if (clickedAbility && gameRuler.playerTurn.owner == "human") {
+                        executeAbility(clickedAbility, players.you, players.bot);
+                        gameRuler.nextTurn();
+                    }
+
+                    hasClicked = true;
+                }
+            });
+        }
+
+        function executeAbility(ability, origin, target) {
+            switch (ability.type) {
+                case "attack":
+                    attack(origin, target);
+                    break;
+                case "heal":
+                    healing(origin);
+                    break;
+                case "stun":
+                    stunning(origin, target);
+                    break;
+                case "jump":
+                    jumping(origin);
+                    break;
+            }
+        }
+
+        // Атака бота
+        function attack(origin, target) {
+            const damage = Math.floor(Math.random() * origin.abilities[0].points) + 1; // Случайный урон от 1 до 15
+            origin.jump = false;
+            if( target.jump == false )
+                target.health -= damage;
+            target.stun = false;
+            origin.last_ability = "attack";
+            const setBattleStatus = `${origin.owner} атакует и наносит ${damage} урона`;
+            arJournal.push(setBattleStatus);
+        }
+        // Функция для лечения
+        function healing(origin) {
+            origin.jump = false;
+            const healing = 20;
+            origin.health += healing;
+            origin.last_ability = "heal";
+            const setBattleStatus = `${origin.owner} восстановил ${healing} здоровья`;
+            arJournal.push(setBattleStatus);
+        }
+        function stunning(origin, target) {
+            origin.jump = false;
+            if( target.stun == false ){
+                target.stun = true;
+                gameRuler.nextTurn(true);
+            }
+            origin.last_ability = "stun";
+            const setBattleStatus = `${origin.owner} заморозил ${target.owner}`;
+            arJournal.push(setBattleStatus);
+        }
+        function jumping(origin) {
+            const evadeChance = 0.2; // 20% шанс на уворот
+            if (Math.random() < evadeChance) {
+                origin.jump = true;
+                origin.last_ability = "jump";
+                const setBattleStatus  =`${origin.owner} увернулся`;
+                arJournal.push(setBattleStatus);
+            } else {
+                origin.jump = false;
+                const setBattleStatus = `${origin.owner} НЕ увернулся`;
+                arJournal.push(setBattleStatus);
+            }
+        }
+
+        function scene() {
+
+            gameStage = "battle";
+            if( players.you.health <= 0 || players.bot.health <= 0 ) {
+                gameStage = "win";
+
+                dynaminLayer.scene((ctx, layer, w, h) => {
+                    ctx.clearRect(0, 0, w, h);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '18px font8bit';
+                    const winnerTxt = players.you.health <=0 ? players.you.owner : players.bot.owner;
+                    ctx.fillText(`Battle end`, w / 2 - 160, h / 2);
+                    ctx.fillText(`Winner is ${winnerTxt}`, w / 2 - 240, h / 2 + 40);
+                });
+            } else {
+                if(gameRuler.playerTurn.owner == "zombie") {
+                    brain.think([players.you, players.bot]);
+                    gameRuler.nextTurn();
+                }
+
+                dynaminLayer.scene((ctx, layer, w, h) => {
+                    ctx.clearRect(0, 0, w, h);
+
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px font8bit';
+                    if(arJournal[arJournal.length - 1]) ctx.fillText(`[${arJournal[arJournal.length - 1]}]`, 20, 90);
+                    if(arJournal[arJournal.length - 2]) ctx.fillText(`[${arJournal[arJournal.length - 2]}]`, 20, h - 255);
+                    
+
+                    ctx.fillStyle = 'green';
+                    ctx.font = '20px font8bit';
+                    ctx.fillText(`${players.you.owner}`, w-255, h-45);
+                    ctx.fillText(`Здоровье ${players.you.health}`, w-255, h-20);
+                    ctx.fillStyle = 'purple';
+                    ctx.fillText(`${players.bot.owner}`, 20, 40);
+                    ctx.fillText(`Здоровье ${players.bot.health}`, 20, 65);
+
+                    ctx.font = '22px font8bit';
+                    /*for(let i = 0; i < players.bot.abilities.length; i++) {
+                        const btn = players.bot.abilities[i];
+                        if( btn.type === players.bot.last_ability ) {
+                            ctx.fillStyle = 'yellow';
+                            ctx.fillText(`> ${btn.label}`, btn.x, btn.y);
+                        } else {
+                            ctx.fillStyle = 'white';
+                            ctx.fillText(`${btn.label}`, btn.x, btn.y);
+                        }
+                    }*/
+                    for(let j = 0; j < players.you.abilities.length; j++) {
+                        const btn = players.you.abilities[j];
+                        if( btn.type === players.you.last_ability ) {
+                            ctx.fillStyle = 'yellow';
+                            ctx.fillText(`> ${btn.label}`, btn.x, btn.y);
+                        } else {
+                            ctx.fillStyle = 'white';
+                            ctx.fillText(`${btn.label}`, btn.x, btn.y);
+                        }
+                    }
+
+                    handleClickPosition(layer);
+                });
+            }
+
+            requestAnimationFrame(scene);
+            hasClicked = false;
+        }
+
+        (function(){
+            gameStage = "init";
+
+            font8bit.load().then((font) => {
+                document.fonts.add(font);
+            });
+
+            staticLayer.init();
+            dynaminLayer.init();
+            staticLayer.scene((ctx, layer, w, h) => {
+                ctx.clearRect(0, 0, w, h);
+                ctx.fillStyle = "black";
+                ctx.fillRect(0, 0, w, h);
+
+                you.onload = () => {
+                    ctx.drawImage(you, 0, h-(w / 3), w / 3, w / 3);
+                }
+                bot.onload = () => {
+                    ctx.drawImage(bot, w-(w / 3), 5, w / 3, w / 3);
+                }
+
+
+            });
+
+            scene();
+        })();
+    </script>
+</body>
+</html>
